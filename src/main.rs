@@ -1,10 +1,6 @@
-use std::{fs, process::Command};
-use sysinfo::{Pid, PidExt, System, SystemExt, ProcessExt};
-use tokio::{
-    fs::File,
-    io::{AsyncWriteExt},
-    time::Duration,
-};
+use std::{process::Command};
+use sysinfo::{Pid, PidExt, ProcessStatus, System, SystemExt, ProcessExt};
+use tokio::{fs::File, io::AsyncWriteExt, time::Duration};
 
 const DEFAULT_TICK_DURATION: u64 = 500; // ms
 
@@ -18,17 +14,26 @@ async fn main() {
     gather_metric_on_timer(Duration::from_millis(DEFAULT_TICK_DURATION), &mut sys, &pid).await;
 }
 
+// it looks like the process goes to zombie while the profiler is still running, but could be
+// sleeping at other times
 async fn gather_metric_on_timer(duration: Duration, sys: &mut System, pid: &Pid) {
     'MetricLoop: loop {
         tokio::time::sleep(duration).await;
         sys.refresh_processes();
         match sys.process(*pid) {
-            Some(p) => {
-                let output = p.memory();
-                log_output_to_file(output.to_string().as_bytes()).await;
-            }
+            Some(p) => match p.status() {
+                ProcessStatus::Zombie => {
+                    // process has been zombied, that means that the chiled finished but has not
+                    // exited
+                    break 'MetricLoop;
+                }
+                _ => {
+                    let output = p.memory();
+                    log_output_to_file(output.to_string().as_bytes()).await;
+                }
+            },
             None => {
-                // process not found, it must have exited
+                // process not found, it must have exited with some unhandled status
                 break 'MetricLoop;
             }
         };
