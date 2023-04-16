@@ -1,0 +1,12 @@
+[package]
+name = "platypus"
+version = "0.1.0"
+edition = "2021"
+description = "A tool for process level profiling of a command"
+
+[dependencies]
+clap = { version = "4", features = ["derive", "color"]}
+plotters = "0.3"
+sysinfo = "0.28"
+tokio = { version = "1", features = ["full", "time"] }
+
