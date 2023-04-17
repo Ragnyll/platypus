@@ -2,9 +2,11 @@
 name = "platypus"
 version = "0.1.0"
 edition = "2021"
-description = "A tool for process level profiling of a command"
+description = "A tool for process level profiling of a command. Doesnt work well (or sometimes at all) on commands that execute quickly."
 
 [dependencies]
+anyhow = "1.0.70"
+chrono = "0.4"
 clap = { version = "4", features = ["derive", "color"]}
 plotters = "0.3"
 sysinfo = "0.28"
