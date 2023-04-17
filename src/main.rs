@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use chrono::Local;
 use clap::Parser;
 use std::process::Command;
-use sysinfo::{Pid, PidExt, ProcessStatus, System, SystemExt, ProcessExt};
+use sysinfo::{Pid, PidExt, ProcessExt, ProcessStatus, System, SystemExt};
 use tokio::{fs::File, io::AsyncWriteExt, time::Duration};
 
 const DEFAULT_TICK_DURATION: u64 = 500; // ms
@@ -21,18 +21,6 @@ struct Cli {
 
     /// The cmd to profile
     cmd: String,
-}
-
-/// builds a command with args seperateing the flags by whitespace
-fn build_cmd_with_args(cmd_string: &str) -> Result<Command> {
-    let sp: Vec<String> = cmd_string.split(' ').map(String::from).collect();
-    // in practice this is not possible
-    if sp.is_empty() {
-        return Err(anyhow!("Cannot run a nonexistent command"));
-    }
-    let mut cmd = Command::new(&sp[0]);
-    cmd.args(&sp[1..]);
-    Ok(cmd)
 }
 
 #[tokio::main]
@@ -57,8 +45,18 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-// it looks like the process goes to zombie while the profiler is still running, but could be
-// sleeping at other times
+/// builds a command with args seperateing the flags by whitespace
+fn build_cmd_with_args(cmd_string: &str) -> Result<Command> {
+    let sp: Vec<String> = cmd_string.split(' ').map(String::from).collect();
+    // in practice this is not possible
+    if sp.is_empty() {
+        return Err(anyhow!("Cannot run a nonexistent command"));
+    }
+    let mut cmd = Command::new(&sp[0]);
+    cmd.args(&sp[1..]);
+    Ok(cmd)
+}
+
 async fn gather_metric_on_timer(
     duration: Duration,
     sys: &mut System,
@@ -71,8 +69,8 @@ async fn gather_metric_on_timer(
         match sys.process(*pid) {
             Some(p) => match p.status() {
                 ProcessStatus::Zombie => {
-                    // process has been zombied, that means that the chiled finished but has not
-                    // exited
+                    // process has been zombied, that means that the child finished but parent has not
+                    // exited in this case
                     break 'MetricLoop;
                 }
                 _ => {
