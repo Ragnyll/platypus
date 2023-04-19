@@ -24,4 +24,5 @@ pub enum Commands {
         /// The cmd to profile
         cmd: String,
     },
+    Plot
 }
