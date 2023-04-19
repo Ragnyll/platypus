@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 
 const DEFAULT_TICK_DURATION: u64 = 500; // ms
-// TODO: This needs to be determined
+                                        // TODO: This needs to be determined
 const DEFAULT_PROFILE_LOG_PATH: &str = "platypus_profile";
 
 #[derive(Parser)]
@@ -25,5 +25,5 @@ pub enum Commands {
         /// The cmd to profile
         cmd: String,
     },
-    Plot
+    Plot,
 }

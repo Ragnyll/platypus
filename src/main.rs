@@ -17,7 +17,7 @@ async fn main() -> Result<()> {
             cmd,
         } => {
             profiler::profile(&log_dir, tick_duration, &cmd).await?;
-        },
+        }
         Commands::Plot => {
             plot::plot()?;
         }

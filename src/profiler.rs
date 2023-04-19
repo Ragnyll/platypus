@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use chrono::Local;
 use std::{collections::HashMap, path::PathBuf, process::Command, sync::Arc};
-use sysinfo::{Pid, PidExt, ProcessExt, ProcessStatus, System, SystemExt};
+use sysinfo::{CpuExt, Pid, PidExt, ProcessExt, ProcessStatus, System, SystemExt};
 use tokio::{fs, fs::File, io::AsyncWriteExt, sync::Mutex, time::Duration};
 
 const MEMORY_FILE: (&str, &str) = ("memory.log", "memory");
@@ -70,17 +70,39 @@ async fn gather_metrics(
     // using an async mutex because you need to wait across locks so there is not block on
     // obtaining a lock
     let sys = Arc::new(Mutex::new(System::new_all()));
-    // if any of the futures finish then that means that the proes being monitored has finished.
+    // if any of the futures finish then that means that the process being monitored has finished.
+    // specifically, right now since memory monitors the process it will always be the one to
+    // win the future race
     tokio::select! {
-        _ = gather_metric_on_timer(duration, sys.clone(), &pid, output_files.remove(MEMORY_FILE.1).unwrap()) => {},
-        _ = gather_metric_on_timer(duration, sys, &pid, output_files.remove(CPU_FILE.1).unwrap()) => {},
-
+        _ = gather_memory_metric_on_timer(duration, sys.clone(), pid, output_files.remove(MEMORY_FILE.1).unwrap()) => {},
+        _ = gather_cpu_metric_on_timer(duration, sys, output_files.remove(CPU_FILE.1).unwrap()) => {},
     }
 
     Ok(())
 }
 
-async fn gather_metric_on_timer(
+async fn gather_cpu_metric_on_timer(
+    duration: Duration,
+    sys: Arc<Mutex<System>>,
+    mut file: File,
+) -> Result<()> {
+    loop {
+        tokio::time::sleep(duration).await;
+        let mut sys = sys.lock().await;
+        sys.refresh_cpu();
+        let mut cpu_log_message = format!("{},", Local::now());
+        sys.cpus().iter().for_each(|cpu: &sysinfo::Cpu| {
+            cpu_log_message.push_str(&format!("{},", cpu.cpu_usage()))
+        });
+        // remove the last ',' from the message (should always be the last char)
+        let _ = cpu_log_message.pop();
+        file.write_all(format!("{cpu_log_message}\n").as_bytes())
+            .await?;
+        file.flush().await?;
+    }
+}
+
+async fn gather_memory_metric_on_timer(
     duration: Duration,
     sys: Arc<Mutex<System>>,
     pid: &Pid,
@@ -100,8 +122,9 @@ async fn gather_metric_on_timer(
                 _ => {
                     let dt = Local::now();
                     let output = p.memory().to_string();
-                    file.write_all(format!("{dt}: {output}\n").as_bytes())
+                    file.write_all(format!("{dt},{output}\n").as_bytes())
                         .await?;
+                    file.flush().await?;
                 }
             },
             None => {
@@ -111,6 +134,5 @@ async fn gather_metric_on_timer(
         };
     }
 
-    file.flush().await?;
     Ok(())
 }
