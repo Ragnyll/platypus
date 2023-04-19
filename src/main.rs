@@ -12,11 +12,11 @@ async fn main() -> Result<()> {
 
     match cli.cmd {
         Commands::Profile {
-            log_path,
+            log_dir,
             tick_duration,
             cmd,
         } => {
-            profiler::profile(&log_path, tick_duration, &cmd).await?;
+            profiler::profile(&log_dir, tick_duration, &cmd).await?;
         },
         Commands::Plot => {
             plot::plot()?;

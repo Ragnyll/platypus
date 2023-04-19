@@ -10,5 +10,5 @@ chrono = "0.4"
 clap = { version = "4", features = ["derive", "color"]}
 plotters = "0.3"
 sysinfo = "0.28"
-tokio = { version = "1", features = ["full", "time"] }
+tokio = { version = "1", features = ["full", "time", "fs"] }
 

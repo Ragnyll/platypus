@@ -1,22 +1,53 @@
 use anyhow::{anyhow, Result};
 use chrono::Local;
-use std::process::Command;
+use std::{collections::HashMap, path::PathBuf, process::Command, sync::Arc};
 use sysinfo::{Pid, PidExt, ProcessExt, ProcessStatus, System, SystemExt};
-use tokio::{fs::File, io::AsyncWriteExt, time::Duration};
+use tokio::{fs, fs::File, io::AsyncWriteExt, sync::Mutex, time::Duration};
+
+const MEMORY_FILE: (&str, &str) = ("memory.log", "memory");
+const CPU_FILE: (&str, &str) = ("cpu.log", "cpu");
 
 pub async fn profile(log_path: &str, tick_duration: u64, cmd: &str) -> Result<()> {
-    let mut sys = System::new_all();
-
-    let file = File::create(log_path)
-        .await
-        .expect("Unable to open profile log file {}");
+    let mut metric_files = prepare_output_paths(log_path).await?;
     let cmd = build_cmd_with_args(cmd);
-    let process_to_profile = cmd?.spawn().expect("failed to start cmd");
+    let process_to_profile = cmd?.spawn()?;
 
     let pid = Pid::from_u32(process_to_profile.id());
-    gather_metric_on_timer(Duration::from_millis(tick_duration), &mut sys, &pid, file).await?;
+    gather_metrics(
+        Duration::from_millis(tick_duration),
+        &pid,
+        &mut metric_files,
+    )
+    .await?;
+    //gather_metric_on_timer(Duration::from_millis(tick_duration), &mut sys, &pid, file).await?;
 
     Ok(())
+}
+
+/// Creates files and handle for all the metrics to be gathered. This is returned as a map of
+/// metric name to [`File`] handle.
+async fn prepare_output_paths(log_dir: &str) -> Result<HashMap<String, File>> {
+    // make sure that the log_dir does not already exist, but as a file
+    if fs::try_exists(log_dir).await? && fs::metadata(log_dir).await?.is_file() {
+        return Err(anyhow!("log_dir cannot exist as a file!"));
+    }
+    fs::create_dir_all(log_dir).await?;
+
+    let mut metric_file_handles = HashMap::new();
+    let metric_log_path: PathBuf = [log_dir, MEMORY_FILE.0].iter().collect();
+
+    metric_file_handles.insert(
+        String::from(MEMORY_FILE.1),
+        File::create(metric_log_path).await?,
+    );
+
+    let metric_log_path: PathBuf = [log_dir, CPU_FILE.0].iter().collect();
+    metric_file_handles.insert(
+        String::from(CPU_FILE.1),
+        File::create(metric_log_path).await?,
+    );
+
+    Ok(metric_file_handles)
 }
 
 /// builds a command with args seperateing the flags by whitespace
@@ -31,14 +62,33 @@ fn build_cmd_with_args(cmd_string: &str) -> Result<Command> {
     Ok(cmd)
 }
 
+async fn gather_metrics(
+    duration: Duration,
+    pid: &Pid,
+    output_files: &mut HashMap<String, File>,
+) -> Result<()> {
+    // using an async mutex because you need to wait across locks so there is not block on
+    // obtaining a lock
+    let sys = Arc::new(Mutex::new(System::new_all()));
+    // if any of the futures finish then that means that the proes being monitored has finished.
+    tokio::select! {
+        _ = gather_metric_on_timer(duration, sys.clone(), &pid, output_files.remove(MEMORY_FILE.1).unwrap()) => {},
+        _ = gather_metric_on_timer(duration, sys, &pid, output_files.remove(CPU_FILE.1).unwrap()) => {},
+
+    }
+
+    Ok(())
+}
+
 async fn gather_metric_on_timer(
     duration: Duration,
-    sys: &mut System,
+    sys: Arc<Mutex<System>>,
     pid: &Pid,
     mut file: File,
 ) -> Result<()> {
     'MetricLoop: loop {
         tokio::time::sleep(duration).await;
+        let mut sys = sys.lock().await;
         sys.refresh_processes();
         match sys.process(*pid) {
             Some(p) => match p.status() {
